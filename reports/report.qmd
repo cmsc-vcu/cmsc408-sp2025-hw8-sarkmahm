@@ -306,6 +306,7 @@ where `Income Group` is NULL;
 commit;
 """)
 
+
 ```
 ```{python}
 ## Now, display the country again to verify the change stuck!
@@ -315,6 +316,7 @@ select `Short Name`,Region, `Income Group`
 from sp25_sarkermm_user.wdi_country
 where `Country Code` = "VEN";
 """)
+
 ```
 
 ## Task 14
