@@ -7,6 +7,7 @@ GITHUB URL:  <https://github.com/cmsc-vcu/cmsc408-sp2025-hw8-sarkmahm>
 
 # Problem Background
 
+Our goal for the home work is to analyze data using SQL from WDI Database
 
 ```{python}
 from helpers import create_database_engine, run_sql_and_return_df, run_sql_and_return_html, create_db_wrapper, execute_ddl_from_file, execute_ddl
@@ -282,9 +283,9 @@ group by
 ## in the first column.
 
 run_sql_and_return_html(cnx,"""
-SELECT `Short Name`
-FROM wdi_country
-WHERE `Income Group` = Null
+select `Short Name`,Region,`Income Group`
+from sp25_sarkermm_user.wdi_country
+where `Income Group` is NULL;
 """)
 
 ```
@@ -298,10 +299,11 @@ WHERE `Income Group` = Null
 ## NOTE - if you get this wrong, all subsequent tables will be wrong!
 
 execute_ddl(cnx,"""
-UPDATE wdi_country
-SET `Income Group` = 'High income'
-WHERE `Short Name` = 'Venezuela';
-commit; 
+start transaction;
+UPDATE sp25_sarkermm_user.wdi_country
+SET `Income Group` = "High income"
+where `Income Group` is NULL;
+commit;
 """)
 
 ```
@@ -309,11 +311,10 @@ commit;
 ## Now, display the country again to verify the change stuck!
 
 run_sql_and_return_html(cnx,"""
-SELECT `Short Name`
-FROM wdi_country
-WHERE `Short Name` = 'Venezuela'
+select `Short Name`,Region, `Income Group`
+from sp25_sarkermm_user.wdi_country
+where `Country Code` = "VEN";
 """)
-
 ```
 
 ## Task 14
@@ -463,41 +464,31 @@ ORDER BY
 ## in Task 14.  (FYI - I get 6 rows in my final table.)
 ## (skills: select, where, subqueries, joins)
 
-run_sql_and_return_html(cnx,"""
-WITH all_combinations AS (
-    SELECT DISTINCT 
-        r.`Region`, 
-        ig.`Income Group`
-    FROM 
-        (SELECT DISTINCT `Region` FROM wdi_country) r
-    CROSS JOIN 
-        (SELECT DISTINCT `Income Group` FROM wdi_country WHERE `Income Group` IS NOT NULL) ig
-),
-existing_combinations AS (
-    SELECT 
-        `Region`, 
-        `Income Group`, 
-        COUNT(*) AS count_countries
-    FROM 
-        wdi_country
-    WHERE 
-        `Income Group` IS NOT NULL
-    GROUP BY 
-        `Region`, 
-        `Income Group`
-)
+run_sql_and_return_html(cnx, """
 SELECT 
-    ac.`Region`,
-    ac.`Income Group`
+    regions.region, 
+    income_groups.income_group, 
+    'Yes' AS missing
 FROM 
-    all_combinations ac
-LEFT JOIN 
-    existing_combinations ec ON ac.`Region` = ec.`Region` AND ac.`Income Group` = ec.`Income Group`
-WHERE 
-    ec.`Region` IS NULL
+    (
+        SELECT DISTINCT `Region` AS region 
+        FROM sp25_sarkermm_user.wdi_country
+    ) AS regions
+CROSS JOIN 
+    (
+        SELECT DISTINCT `Income Group` AS income_group 
+        FROM sp25_sarkermm_user.wdi_country
+    ) AS income_groups
+WHERE NOT EXISTS (
+    SELECT 1 
+    FROM sp25_sarkermm_user.wdi_country AS original
+    WHERE 
+        original.`Region` = regions.region 
+        AND original.`Income Group` = income_groups.income_group
+)
 ORDER BY 
-    ac.`Region`, 
-    ac.`Income Group`;
+    regions.region, 
+    income_groups.income_group;
 """)
 
 ```
@@ -592,43 +583,37 @@ ORDER BY
 ## print table similar to the table in Task 15, with Income group in the
 ## columns, Region in the rows and Percent of total in each cell of the table.
 
-
-run_sql_and_return_df(cnx,"""
-WITH region_income_counts AS (
+run_sql_and_return_html(cnx,"""
+WITH PercentTotals AS (
     SELECT 
-        `Region`,
-        `Income Group` AS income_cat,
-        COUNT(*) AS country_count
-    FROM wdi_country
-    WHERE `Income Group` IS NOT NULL
-    GROUP BY `Region`, `Income Group`
-),
-region_totals AS (
-    SELECT 
-        `Region`,
-        SUM(country_count) AS region_total
-    FROM region_income_counts
-    GROUP BY `Region`
+        base.region, 
+        base.income_group, 
+        ROUND((base.countries / grand_totals.total_countries) * 100, 2) AS percent_of_total
+    FROM 
+        (SELECT 
+            `Region` AS region, 
+            `Income Group` AS income_group, 
+            COUNT(*) AS countries
+         FROM sp25_sarkermm_user.wdi_country
+         GROUP BY `Region`, `Income Group`
+        ) AS base
+    LEFT JOIN 
+        (SELECT 
+            COUNT(*) AS total_countries
+         FROM sp25_sarkermm_user.wdi_country
+        ) AS grand_totals
+    ON 1 = 1
 )
 SELECT 
-    `Region`,
-    ROUND(SUM(CASE WHEN income_cat = 'High income' 
-              THEN (country_count * 100.0) / region_total ELSE 0 END), 2) AS 'High income pct',
-    ROUND(SUM(CASE WHEN income_cat = 'Upper middle income' 
-              THEN (country_count * 100.0) / region_total ELSE 0 END), 2) AS 'Upper middle pct',
-    ROUND(SUM(CASE WHEN income_cat = 'Lower middle income' 
-              THEN (country_count * 100.0) / region_total ELSE 0 END), 2) AS 'Lower middle pct',
-    ROUND(SUM(CASE WHEN income_cat = 'Low income' 
-              THEN (country_count * 100.0) / region_total ELSE 0 END), 2) AS 'Low income pct',
-    SUM(country_count) AS 'Total Countries'
-FROM 
-    region_income_counts ric
-JOIN 
-    region_totals rt USING (`Region`)
-GROUP BY 
-    `Region`
-ORDER BY 
-    `Region`;
+    region,
+    SUM(CASE WHEN income_group = 'High income' THEN percent_of_total ELSE 0 END) AS high_income,
+    SUM(CASE WHEN income_group = 'Upper middle income' THEN percent_of_total ELSE 0 END) AS upper_middle_income,
+    SUM(CASE WHEN income_group = 'Lower middle income' THEN percent_of_total ELSE 0 END) AS lower_middle_income,
+    SUM(CASE WHEN income_group = 'Low income' THEN percent_of_total ELSE 0 END) AS low_income,
+    SUM(CASE WHEN income_group IS NULL OR income_group NOT IN ('High income', 'Upper middle income', 'Lower middle income', 'Low income') THEN percent_of_total ELSE 0 END) AS other
+FROM PercentTotals
+GROUP BY region
+ORDER BY region;
 """)
 
 ```
